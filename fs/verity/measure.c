@@ -100,3 +100,4 @@ int fsverity_get_digest(struct inode *inode,
 
 	return 0;
 }
+EXPORT_SYMBOL_GPL(fsverity_get_digest);
