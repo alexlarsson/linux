@@ -124,3 +124,16 @@ config OVERLAY_FS_METACOPY
 	  that doesn't support this feature will have unexpected results.
 
 	  If unsure, say N.
+
+config OVERLAY_FS_VERITY
+	bool "Overlayfs: turn on vertity feature by default"
+	depends on OVERLAY_FS
+	help
+	  If this config option is enabled then overlay filesystems will
+	  try to copy fs-verity digests from the lower file into the
+	  metacopy file at metadata copy-up time. It is still possible
+	  to turn off this feature globally with the "verity=off"
+	  module option or on a filesystem instance basis with the
+	  "verity=off" or "verity=validate" mount option.
+
+	  If unsure, say N.

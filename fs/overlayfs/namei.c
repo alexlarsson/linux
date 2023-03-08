@@ -969,6 +969,27 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 			origin = this;
 		}
 
+
+		/* If this is a data file for a metacopy, validate its verity digest against
+		 * what was specified in the metacopy file.
+		 */
+		if (!d.is_dir && !d.metacopy && (uppermetacopy || ctr)) {
+			struct path metacopy_path;
+
+			if (uppermetacopy) {
+				metacopy_path.mnt = ovl_upper_mnt(ofs);
+				metacopy_path.dentry = upperdentry;
+			} else {
+				metacopy_path.mnt = stack[0].layer->mnt;
+				metacopy_path.dentry = stack[0].dentry;
+			}
+			err = ovl_validate_verity(ofs, this, &metacopy_path);
+			if (err) {
+				dput(this);
+				goto out_put;
+			}
+		}
+
 		if (d.metacopy && ctr) {
 			/*
 			 * Do not store intermediate metacopy dentries in

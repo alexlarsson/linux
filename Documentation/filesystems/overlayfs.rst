@@ -371,6 +371,39 @@ conflict with metacopy=on, and will result in an error.
 [*] redirect_dir=follow only conflicts with metacopy=on if upperdir=... is
 given.
 
+fs-verity support
+----------------------
+
+When metadata copy up is used for a file, then the xattr
+"trusted.overlay.verity" may be set on the metacopy file. This
+specifies the expected fs-verity digest of the lowerdata file. This
+may then be used to verify the content of the source file at the time
+the file is opened. If enabled, overlayfs can also set this xattr
+during metadata copy up.
+
+This is controlled by the "verity" mount option, which supports
+these values:
+
+- "off":
+    The verity xattr is never used.
+- "validate":
+    Whenever a metacopy files specifies an expected digest, the
+    corresponding data file must match the specified digest.
+- "on":
+    Same as validate, but additionally, when generating a metacopy
+    file the verity xattr will be set from the source file fs-verity
+    digest (is it has one).
+- "require":
+    Same as "on", but additionally all metacopy files must specify a
+    verity xattr. Additionally metadata copy up will only be used if
+    the data file has fs-verity enabled, otherwise a full copy-up is
+    used.
+
+There are two ways to tune the default behaviour. The kernel config
+option OVERLAY_FS_VERITY, or the module option "verity=BOOL". If
+either of these are enabled, then verity mode is "on" by default,
+otherwise it is "validate".
+
 Sharing and copying layers
 --------------------------
 

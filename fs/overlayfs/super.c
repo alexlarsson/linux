@@ -67,6 +67,11 @@ module_param_named(metacopy, ovl_metacopy_def, bool, 0644);
 MODULE_PARM_DESC(metacopy,
 		 "Default to on or off for the metadata only copy up feature");
 
+static bool ovl_verity_def = IS_ENABLED(CONFIG_OVERLAY_FS_VERITY);
+module_param_named(verity, ovl_verity_def, bool, 0644);
+MODULE_PARM_DESC(verity,
+		 "Default to on or validate for the metadata only copy up feature");
+
 static void ovl_dentry_release(struct dentry *dentry)
 {
 	struct ovl_entry *oe = dentry->d_fsdata;
@@ -252,6 +257,7 @@ static void ovl_free_fs(struct ovl_fs *ofs)
 	kfree(ofs->config.upperdir);
 	kfree(ofs->config.workdir);
 	kfree(ofs->config.redirect_mode);
+	kfree(ofs->config.verity_mode);
 	if (ofs->creator_cred)
 		put_cred(ofs->creator_cred);
 	kfree(ofs);
@@ -342,6 +348,11 @@ static const char *ovl_redirect_mode_def(void)
 	return ovl_redirect_dir_def ? "on" : "off";
 }
 
+static const char *ovl_verity_mode_def(void)
+{
+	return ovl_verity_def ? "on" : "validate";
+}
+
 static const char * const ovl_xino_str[] = {
 	"off",
 	"auto",
@@ -391,6 +402,8 @@ static int ovl_show_options(struct seq_file *m, struct dentry *dentry)
 		seq_puts(m, ",volatile");
 	if (ofs->config.userxattr)
 		seq_puts(m, ",userxattr");
+	if (strcmp(ofs->config.verity_mode, ovl_verity_mode_def()) != 0)
+		seq_printf(m, ",verity=%s", ofs->config.verity_mode);
 	return 0;
 }
 
@@ -446,6 +459,7 @@ enum {
 	OPT_METACOPY_ON,
 	OPT_METACOPY_OFF,
 	OPT_VOLATILE,
+	OPT_VERITY,
 	OPT_ERR,
 };
 
@@ -468,6 +482,7 @@ static const match_table_t ovl_tokens = {
 	{OPT_METACOPY_ON,		"metacopy=on"},
 	{OPT_METACOPY_OFF,		"metacopy=off"},
 	{OPT_VOLATILE,			"volatile"},
+	{OPT_VERITY,			"verity=%s"},
 	{OPT_ERR,			NULL}
 };
 
@@ -517,6 +532,25 @@ static int ovl_parse_redirect_mode(struct ovl_config *config, const char *mode)
 	return 0;
 }
 
+static int ovl_parse_verity_mode(struct ovl_config *config, const char *mode)
+{
+	if (strcmp(mode, "validate") == 0) {
+		config->verity_validate = true;
+	} else if (strcmp(mode, "on") == 0) {
+		config->verity_validate = true;
+		config->verity_generate = true;
+	} else if (strcmp(mode, "require") == 0) {
+		config->verity_validate = true;
+		config->verity_generate = true;
+		config->verity_require = true;
+	} else if (strcmp(mode, "off") != 0) {
+		pr_err("bad mount option \"verity=%s\"\n", mode);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 static int ovl_parse_opt(char *opt, struct ovl_config *config)
 {
 	char *p;
@@ -526,6 +560,10 @@ static int ovl_parse_opt(char *opt, struct ovl_config *config)
 
 	config->redirect_mode = kstrdup(ovl_redirect_mode_def(), GFP_KERNEL);
 	if (!config->redirect_mode)
+		return -ENOMEM;
+
+	config->verity_mode = kstrdup(ovl_verity_mode_def(), GFP_KERNEL);
+	if (!config->verity_mode)
 		return -ENOMEM;
 
 	while ((p = ovl_next_opt(&opt)) != NULL) {
@@ -628,6 +666,13 @@ static int ovl_parse_opt(char *opt, struct ovl_config *config)
 			config->userxattr = true;
 			break;
 
+		case OPT_VERITY:
+			kfree(config->verity_mode);
+			config->verity_mode = match_strdup(&args[0]);
+			if (!config->verity_mode)
+				return -ENOMEM;
+			break;
+
 		default:
 			pr_err("unrecognized mount option \"%s\" or missing value\n",
 					p);
@@ -656,6 +701,10 @@ static int ovl_parse_opt(char *opt, struct ovl_config *config)
 	}
 
 	err = ovl_parse_redirect_mode(config, config->redirect_mode);
+	if (err)
+		return err;
+
+	err = ovl_parse_verity_mode(config, config->verity_mode);
 	if (err)
 		return err;
 
