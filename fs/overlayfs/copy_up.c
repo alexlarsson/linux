@@ -19,6 +19,7 @@
 #include <linux/fdtable.h>
 #include <linux/ratelimit.h>
 #include <linux/exportfs.h>
+#include <linux/fsverity.h>
 #include "overlayfs.h"
 
 #define OVL_COPY_UP_CHUNK_SIZE (1 << 20)
@@ -243,10 +244,15 @@ static int ovl_copy_up_file(struct ovl_fs *ofs, struct dentry *dentry,
 	loff_t hole_len;
 	bool skip_hole = false;
 	int error = 0;
+	int res;
 
 	ovl_path_lowerdata(dentry, &datapath);
 	if (WARN_ON(datapath.dentry == NULL))
 		return -EIO;
+
+	res = ovl_validate_verity(dentry, &datapath);
+	if (res < 0)
+		return res;
 
 	old_file = ovl_path_open(&datapath, O_LARGEFILE | O_RDONLY);
 	if (IS_ERR(old_file))
@@ -606,6 +612,24 @@ static int ovl_copy_up_data(struct ovl_copy_up_ctx *c, const struct path *temp)
 	return err;
 }
 
+static int ovl_metacopy_verity(struct ovl_copy_up_ctx *c, struct dentry *temp)
+{
+	struct ovl_fs *ofs = OVL_FS(c->dentry->d_sb);
+	u8 digest[FS_VERITY_MAX_DIGEST_SIZE];
+	int digest_len;
+	int err;
+
+	digest_len = sizeof(digest);
+	err = ovl_get_verity_xattr(ofs, &c->lowerpath, digest, &digest_len);
+	if (err == -ENODATA)
+		return 0;
+	if (err < 0)
+		return err;
+
+	return ovl_check_setxattr(ofs, temp, OVL_XATTR_VERITY,
+				  digest, digest_len, -EOPNOTSUPP);
+}
+
 static int ovl_copy_up_metadata(struct ovl_copy_up_ctx *c, struct dentry *temp)
 {
 	struct ovl_fs *ofs = OVL_FS(c->dentry->d_sb);
@@ -643,6 +667,11 @@ static int ovl_copy_up_metadata(struct ovl_copy_up_ctx *c, struct dentry *temp)
 	if (c->metacopy) {
 		err = ovl_check_setxattr(ofs, temp, OVL_XATTR_METACOPY,
 					 NULL, 0, -EOPNOTSUPP);
+
+		/* Copy the verity digest if any so we can validate the copy-up later */
+		if (!err)
+			err = ovl_metacopy_verity(c, temp);
+
 		if (err)
 			return err;
 	}
@@ -981,6 +1010,10 @@ static int ovl_copy_up_meta_inode_data(struct ovl_copy_up_ctx *c)
 
 	err = ovl_removexattr(ofs, upperpath.dentry, OVL_XATTR_METACOPY);
 	if (err)
+		goto out_free;
+
+	err = ovl_removexattr(ofs, upperpath.dentry, OVL_XATTR_VERITY);
+	if (err && err != -ENODATA)
 		goto out_free;
 
 	ovl_set_upperdata(d_inode(c->dentry));

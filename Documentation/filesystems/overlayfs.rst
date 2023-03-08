@@ -371,6 +371,29 @@ conflict with metacopy=on, and will result in an error.
 [*] redirect_dir=follow only conflicts with metacopy=on if upperdir=... is
 given.
 
+fs-verity support
+----------------------
+
+When metadata copy up is used for a file in a lower or upper dir,
+meaning that the file data comes from another file, then the xattr
+"trusted.overlay.verity" can be set on the metacopy file. This allows
+specifying the expected fs-verity digest of the data file. This may
+then be used to verify the content of the source file at the time the
+file is opened.
+
+This is controlled by the "verity_policy" mount option, which supports
+these values:
+
+- "never" (or unset):
+    The "trusted.overlay.verity" xattr is never used.
+- "validate":
+    Whenever a metacopy files specifies an expected digest, the
+    corresponding data file must match the specified digest, or open
+    will fail.
+- "require":
+    Same as "validate", but additionally all metacopy files must specify
+    a verity digest, or open will fail.
+
 Sharing and copying layers
 --------------------------
 

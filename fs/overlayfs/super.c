@@ -252,6 +252,7 @@ static void ovl_free_fs(struct ovl_fs *ofs)
 	kfree(ofs->config.upperdir);
 	kfree(ofs->config.workdir);
 	kfree(ofs->config.redirect_mode);
+	kfree(ofs->config.verity_policy);
 	if (ofs->creator_cred)
 		put_cred(ofs->creator_cred);
 	kfree(ofs);
@@ -391,6 +392,8 @@ static int ovl_show_options(struct seq_file *m, struct dentry *dentry)
 		seq_puts(m, ",volatile");
 	if (ofs->config.userxattr)
 		seq_puts(m, ",userxattr");
+	if (ofs->config.verity_policy)
+		seq_printf(m, ",verity_policy=%s", ofs->config.verity_policy);
 	return 0;
 }
 
@@ -446,6 +449,7 @@ enum {
 	OPT_METACOPY_ON,
 	OPT_METACOPY_OFF,
 	OPT_VOLATILE,
+	OPT_VERITY_POLICY,
 	OPT_ERR,
 };
 
@@ -468,6 +472,7 @@ static const match_table_t ovl_tokens = {
 	{OPT_METACOPY_ON,		"metacopy=on"},
 	{OPT_METACOPY_OFF,		"metacopy=off"},
 	{OPT_VOLATILE,			"volatile"},
+	{OPT_VERITY_POLICY,		"verity_policy=%s"},
 	{OPT_ERR,			NULL}
 };
 
@@ -511,6 +516,25 @@ static int ovl_parse_redirect_mode(struct ovl_config *config, const char *mode)
 	} else if (strcmp(mode, "nofollow") != 0) {
 		pr_err("bad mount option \"redirect_dir=%s\"\n",
 		       mode);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int ovl_parse_verity_policy(struct ovl_config *config, const char *policy)
+{
+	if (policy == NULL || strcmp(policy, "never") == 0) {
+		config->validate_verity = false;
+		config->require_verity = false;
+	} else if (strcmp(policy, "validate") == 0) {
+		config->require_verity = false;
+		config->validate_verity = true;
+	} else if (strcmp(policy, "require") == 0) {
+		config->require_verity = true;
+		config->validate_verity = true;
+	} else {
+		pr_err("bad mount option \"verity_policy=%s\"\n", policy);
 		return -EINVAL;
 	}
 
@@ -628,6 +652,13 @@ static int ovl_parse_opt(char *opt, struct ovl_config *config)
 			config->userxattr = true;
 			break;
 
+		case OPT_VERITY_POLICY:
+			kfree(config->verity_policy);
+			config->verity_policy = match_strdup(&args[0]);
+			if (!config->verity_policy)
+				return -ENOMEM;
+			break;
+
 		default:
 			pr_err("unrecognized mount option \"%s\" or missing value\n",
 					p);
@@ -656,6 +687,10 @@ static int ovl_parse_opt(char *opt, struct ovl_config *config)
 	}
 
 	err = ovl_parse_redirect_mode(config, config->redirect_mode);
+	if (err)
+		return err;
+
+	err = ovl_parse_verity_policy(config, config->verity_policy);
 	if (err)
 		return err;
 

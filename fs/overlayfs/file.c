@@ -154,10 +154,15 @@ static int ovl_open(struct inode *inode, struct file *file)
 	if (err)
 		return err;
 
+	ovl_path_realdata(dentry, &realpath);
+
+	err = ovl_validate_verity(dentry, &realpath);
+	if (err)
+		return err;
+
 	/* No longer need these flags, so don't pass them on to underlying fs */
 	file->f_flags &= ~(O_CREAT | O_EXCL | O_NOCTTY | O_TRUNC);
 
-	ovl_path_realdata(dentry, &realpath);
 	realfile = ovl_open_realfile(file, &realpath);
 	if (IS_ERR(realfile))
 		return PTR_ERR(realfile);

@@ -12,6 +12,9 @@ struct ovl_config {
 	bool default_permissions;
 	bool redirect_dir;
 	bool redirect_follow;
+	bool validate_verity;
+	const char *verity_policy;
+	bool require_verity;
 	const char *redirect_mode;
 	bool index;
 	bool uuid;
