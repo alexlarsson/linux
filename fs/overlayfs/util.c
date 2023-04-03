@@ -331,17 +331,28 @@ struct dentry *ovl_i_dentry_upper(struct inode *inode)
 	return ovl_upperdentry_dereference(OVL_I(inode));
 }
 
-void ovl_i_path_real(struct inode *inode, struct path *path)
+void ovl_e_path_real(struct ovl_fs *ofs,
+		     struct ovl_entry *oe,
+		     struct dentry *upperdentry,
+		     struct path *path)
 {
-	struct ovl_path *lowerpath = ovl_lowerpath(OVL_I_E(inode));
+	if (upperdentry) {
+		path->dentry = upperdentry;
+		path->mnt = ovl_upper_mnt(ofs);
+	} else {
+		struct ovl_path *lowerpath = ovl_lowerpath(oe);
 
-	path->dentry = ovl_i_dentry_upper(inode);
-	if (!path->dentry) {
 		path->dentry = lowerpath->dentry;
 		path->mnt = lowerpath->layer->mnt;
-	} else {
-		path->mnt = ovl_upper_mnt(OVL_FS(inode->i_sb));
 	}
+}
+
+void ovl_i_path_real(struct inode *inode, struct path *path)
+{
+	ovl_e_path_real(OVL_FS(inode->i_sb),
+			OVL_I_E(inode),
+			ovl_i_dentry_upper(inode),
+			path);
 }
 
 struct inode *ovl_inode_upper(struct inode *inode)
