@@ -407,6 +407,33 @@ when a "metacopy" file in one of the lower layers above it, has a "redirect"
 to the absolute path of the "lower data" file in the "data-only" lower layer.
 
 
+fs-verity support
+----------------------
+
+When metadata copy up is used for a file, then the xattr
+"trusted.overlay.verity" may be set on the metacopy file. This
+specifies the expected fs-verity digest of the lowerdata file. This
+may then be used to verify the content of the source file at the time
+the file is opened. During metacopy copy up overlayfs can also set
+this xattr.
+
+This is controlled by the "verity" mount option, which supports
+these values:
+
+- "off":
+    The verity xattr is never used. This is the default if verity
+    option is not specified.
+- "on":
+    Whenever a metacopy files specifies an expected digest, the
+    corresponding data file must match the specified digest.
+    When generating a metacopy file the verity xattr will be set
+    from the source file fs-verity digest (if it has one).
+- "require":
+    Same as "on", but additionally all metacopy files must specify a
+    verity xattr. This means metadata copy up will only be used if
+    the data file has fs-verity enabled, otherwise a full copy-up is
+    used.
+
 Sharing and copying layers
 --------------------------
 
