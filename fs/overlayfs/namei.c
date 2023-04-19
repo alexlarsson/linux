@@ -892,6 +892,7 @@ static int ovl_fix_origin(struct ovl_fs *ofs, struct dentry *dentry,
 /* Lazy lookup of lowerdata */
 int ovl_maybe_lookup_lowerdata(struct dentry *dentry)
 {
+	struct ovl_fs *ofs = dentry->d_sb->s_fs_info;
 	struct inode *inode = d_inode(dentry);
 	const char *redirect = ovl_lowerdata_redirect(inode);
 	struct ovl_path datapath = {};
@@ -915,9 +916,25 @@ int ovl_maybe_lookup_lowerdata(struct dentry *dentry)
 
 	old_cred = ovl_override_creds(dentry->d_sb);
 	err = ovl_lookup_data_layers(dentry, redirect, &datapath);
-	revert_creds(old_cred);
 	if (err)
-		goto out_err;
+		goto out_revert_creds;
+
+	if (ofs->config.verity) {
+		struct path data = { .mnt = datapath.layer->mnt, .dentry = datapath.dentry, };
+		struct path metapath = {};
+
+		ovl_path_real(dentry, &metapath);
+		if (!metapath.dentry) {
+			err = -EIO;
+			goto out_revert_creds;
+		}
+
+		err = ovl_validate_verity(ofs, &metapath, &data);
+		if (err)
+			goto out_revert_creds;
+	}
+
+	revert_creds(old_cred);
 
 	err = ovl_dentry_set_lowerdata(dentry, &datapath);
 	if (err)
@@ -928,6 +945,9 @@ out:
 	dput(datapath.dentry);
 
 	return err;
+
+ out_revert_creds:
+	revert_creds(old_cred);
 
 out_err:
 	pr_warn_ratelimited("lazy lowerdata lookup failed (%pd2, err=%i)\n",
@@ -1186,6 +1206,24 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 		goto out_put;
 
 	ovl_stack_cpy(ovl_lowerstack(oe), stack, ctr);
+
+	/* Validate verity of lower-data */
+	if (ofs->config.verity &&
+	    !d.is_dir && (uppermetacopy || ctr > 1)) {
+		struct path datapath;
+
+		ovl_e_path_lowerdata(oe, &datapath);
+
+		/* Is NULL for lazy lookup, will be verified later */
+		if (datapath.dentry) {
+			struct path metapath;
+
+			ovl_e_path_real(ofs, oe, upperdentry, &metapath);
+			err = ovl_validate_verity(ofs, &metapath, &datapath);
+			if (err < 0)
+				goto out_free_oe;
+		}
+	}
 
 	if (upperopaque)
 		ovl_dentry_set_opaque(dentry);
