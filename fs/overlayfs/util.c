@@ -1188,7 +1188,7 @@ int ovl_get_verity_xattr(struct ovl_fs *ofs, const struct path *path,
 }
 
 /* Call with mounter creds as it may open the file */
-static int ovl_ensure_verity_loaded(struct path *datapath)
+int ovl_ensure_verity_loaded(struct path *datapath)
 {
 	struct inode *inode = d_inode(datapath->dentry);
 	const struct fsverity_info *vi;
@@ -1260,6 +1260,43 @@ int ovl_validate_verity(struct ovl_fs *ofs,
 	}
 
 	return 0;
+}
+
+int ovl_set_verity_xattr_from(struct ovl_fs *ofs, struct dentry *dst,
+			      struct path *src)
+{
+	int err;
+	u8 src_digest[1+FS_VERITY_MAX_DIGEST_SIZE];
+	enum hash_algo verity_algo;
+
+	if (!ofs->config.verity || !S_ISREG(d_inode(dst)->i_mode))
+		return 0;
+
+	err = -EIO;
+	if (src) {
+		err = ovl_ensure_verity_loaded(src);
+		if (err < 0) {
+			pr_warn_ratelimited("lower file '%pd' failed to load fs-verity info\n",
+					    src->dentry);
+			return -EIO;
+		}
+
+		err = fsverity_get_digest(d_inode(src->dentry), src_digest + 1, &verity_algo);
+	}
+	if (err == -ENODATA) {
+		if (ofs->config.require_verity) {
+			pr_warn_ratelimited("lower file '%pd' has no fs-verity digest\n",
+					    src->dentry);
+			return -EIO;
+		}
+		return 0;
+	}
+	if (err < 0)
+		return err;
+
+	src_digest[0] = (u8)verity_algo;
+	return ovl_check_setxattr(ofs, dst, OVL_XATTR_VERITY,
+				  src_digest, 1 + hash_digest_size[verity_algo], -EOPNOTSUPP);
 }
 
 /*

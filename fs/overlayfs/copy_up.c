@@ -19,6 +19,7 @@
 #include <linux/fdtable.h>
 #include <linux/ratelimit.h>
 #include <linux/exportfs.h>
+#include <linux/fsverity.h>
 #include "overlayfs.h"
 
 #define OVL_COPY_UP_CHUNK_SIZE (1 << 20)
@@ -644,6 +645,18 @@ static int ovl_copy_up_metadata(struct ovl_copy_up_ctx *c, struct dentry *temp)
 	if (c->metacopy) {
 		err = ovl_check_setxattr(ofs, temp, OVL_XATTR_METACOPY,
 					 NULL, 0, -EOPNOTSUPP);
+
+		/* Copy the verity digest if any so we can validate the copy-up later */
+		if (!err) {
+			struct path lowerdatapath;
+
+			ovl_path_lowerdata(c->dentry, &lowerdatapath);
+			if (WARN_ON_ONCE(lowerdatapath.dentry == NULL))
+				err = -EIO;
+			else
+				err = ovl_set_verity_xattr_from(ofs, temp, &lowerdatapath);
+		}
+
 		if (err)
 			return err;
 	}
@@ -919,6 +932,19 @@ static bool ovl_need_meta_copy_up(struct dentry *dentry, umode_t mode,
 	if (flags && ((OPEN_FMODE(flags) & FMODE_WRITE) || (flags & O_TRUNC)))
 		return false;
 
+	/* Fall back to full copy if no fsverity on source data and we require verity */
+	if (ofs->config.require_verity) {
+		struct path lowerdata;
+
+		ovl_path_lowerdata(dentry, &lowerdata);
+
+		if (WARN_ON_ONCE(lowerdata.dentry == NULL) ||
+		    ovl_ensure_verity_loaded(&lowerdata) ||
+		    !fsverity_get_info(d_inode(lowerdata.dentry))) {
+			return false;
+		}
+	}
+
 	return true;
 }
 
@@ -985,6 +1011,11 @@ static int ovl_copy_up_meta_inode_data(struct ovl_copy_up_ctx *c)
 	if (err)
 		goto out_free;
 
+	err = ovl_removexattr(ofs, upperpath.dentry, OVL_XATTR_VERITY);
+	if (err && err != -ENODATA)
+		goto out_free;
+
+	err = 0;
 	ovl_set_upperdata(d_inode(c->dentry));
 out_free:
 	kfree(capability);
