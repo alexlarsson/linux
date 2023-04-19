@@ -26,6 +26,7 @@ struct ovl_lookup_data {
 	bool last;
 	char *redirect;
 	bool metacopy;
+	bool metacopy_digest;
 	/* Referring to last redirect xattr */
 	bool absolute_redirect;
 };
@@ -233,6 +234,7 @@ static int ovl_lookup_single(struct dentry *base, struct ovl_lookup_data *d,
 {
 	struct dentry *this;
 	struct path path;
+	int metacopy_size;
 	int err;
 	bool last_element = !post[0];
 
@@ -270,11 +272,14 @@ static int ovl_lookup_single(struct dentry *base, struct ovl_lookup_data *d,
 			d->stop = true;
 			goto put_and_out;
 		}
-		err = ovl_check_metacopy_xattr(OVL_FS(d->sb), &path);
-		if (err < 0)
+		metacopy_size = ovl_check_metacopy_xattr(OVL_FS(d->sb), &path, NULL);
+		if (metacopy_size < 0) {
+			err = metacopy_size;
 			goto out_err;
+		}
 
-		d->metacopy = err;
+		d->metacopy = metacopy_size;
+		d->metacopy_digest = d->metacopy && metacopy_size > OVL_METACOPY_MIN_SIZE;
 		d->stop = !d->metacopy;
 		if (!d->metacopy || d->last)
 			goto out;
@@ -889,8 +894,59 @@ static int ovl_fix_origin(struct ovl_fs *ofs, struct dentry *dentry,
 	return err;
 }
 
+static int ovl_maybe_validate_verity(struct dentry *dentry)
+{
+	struct ovl_fs *ofs = dentry->d_sb->s_fs_info;
+	struct inode *inode = d_inode(dentry);
+	struct path datapath, metapath;
+	int err;
+
+	if (!ofs->config.verity_mode ||
+	    !ovl_is_metacopy_dentry(dentry) ||
+	    ovl_test_flag(OVL_VERIFIED_DIGEST, inode))
+		return 0;
+
+	if (!ovl_test_flag(OVL_HAS_DIGEST, inode)) {
+		if (ofs->config.verity_mode == OVL_VERITY_REQUIRE) {
+			pr_warn_ratelimited("metacopy file '%pd' has no digest specified\n",
+					    dentry);
+			return -EIO;
+		}
+		return 0;
+	}
+
+	ovl_path_lowerdata(dentry, &datapath);
+	if (!datapath.dentry)
+		return -EIO;
+
+	ovl_path_real(dentry, &metapath);
+	if (!metapath.dentry)
+		return -EIO;
+
+	err = ovl_inode_lock_interruptible(inode);
+	if (err)
+		return err;
+
+	if (ovl_test_flag(OVL_HAS_DIGEST, inode) &&
+	    !ovl_test_flag(OVL_VERIFIED_DIGEST, inode)) {
+		const struct cred *old_cred;
+
+		old_cred = ovl_override_creds(dentry->d_sb);
+
+		err = ovl_validate_verity(ofs, &metapath, &datapath);
+		if (err == 0)
+			ovl_set_flag(OVL_VERIFIED_DIGEST, inode);
+
+		revert_creds(old_cred);
+	}
+
+	ovl_inode_unlock(inode);
+
+	return err;
+}
+
 /* Lazy lookup of lowerdata */
-int ovl_maybe_lookup_lowerdata(struct dentry *dentry)
+static int ovl_maybe_lookup_lowerdata(struct dentry *dentry)
 {
 	struct inode *inode = d_inode(dentry);
 	const char *redirect = ovl_lowerdata_redirect(inode);
@@ -935,6 +991,17 @@ out_err:
 	goto out;
 }
 
+int ovl_verify_lowerdata(struct dentry *dentry)
+{
+	int err;
+
+	err = ovl_maybe_lookup_lowerdata(dentry);
+	if (err)
+		return err;
+
+	return ovl_maybe_validate_verity(dentry);
+}
+
 struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 			  unsigned int flags)
 {
@@ -952,9 +1019,11 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 	bool upperopaque = false;
 	char *upperredirect = NULL;
 	struct dentry *this;
+	int metacopy_size;
 	unsigned int i;
 	int err;
 	bool uppermetacopy = false;
+	bool metacopy_digest = false;
 	struct ovl_lookup_data d = {
 		.sb = dentry->d_sb,
 		.name = dentry->d_name,
@@ -964,6 +1033,7 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 		.last = ovl_redirect_follow(ofs) ? false : !ovl_numlower(poe),
 		.redirect = NULL,
 		.metacopy = false,
+		.metacopy_digest = false,
 	};
 
 	if (dentry->d_name.len > ofs->namelen)
@@ -997,8 +1067,10 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 			if (err)
 				goto out_put_upper;
 
-			if (d.metacopy)
+			if (d.metacopy) {
 				uppermetacopy = true;
+				metacopy_digest = d.metacopy_digest;
+			}
 		}
 
 		if (d.redirect) {
@@ -1075,6 +1147,9 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 			}
 			origin = this;
 		}
+
+		if (!upperdentry && !d.is_dir && !ctr && d.metacopy)
+			metacopy_digest = d.metacopy_digest;
 
 		if (d.metacopy && ctr) {
 			/*
@@ -1211,10 +1286,13 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 			upperredirect = NULL;
 			goto out_free_oe;
 		}
-		err = ovl_check_metacopy_xattr(ofs, &upperpath);
-		if (err < 0)
+		metacopy_size = ovl_check_metacopy_xattr(ofs, &upperpath, NULL);
+		if (metacopy_size < 0) {
+			err = metacopy_size;
 			goto out_free_oe;
-		uppermetacopy = err;
+		}
+		uppermetacopy = metacopy_size;
+		metacopy_digest = metacopy_size >  OVL_METACOPY_MIN_SIZE;
 	}
 
 	if (upperdentry || ctr) {
@@ -1236,6 +1314,9 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 			goto out_free_oe;
 		if (upperdentry && !uppermetacopy)
 			ovl_set_flag(OVL_UPPERDATA, inode);
+
+		if ((uppermetacopy || ctr > 1) && metacopy_digest)
+			ovl_set_flag(OVL_HAS_DIGEST, inode);
 	}
 
 	ovl_dentry_init_reval(dentry, upperdentry, OVL_I_E(inode));
