@@ -391,6 +391,7 @@ void ovl_path_upper(struct dentry *dentry, struct path *path);
 void ovl_path_lower(struct dentry *dentry, struct path *path);
 void ovl_path_lowerdata(struct dentry *dentry, struct path *path);
 void ovl_i_path_real(struct inode *inode, struct path *path);
+void ovl_e_path_lowerdata(struct ovl_entry *oe, struct path *path);
 void ovl_e_path_real(struct ovl_fs *ofs, struct ovl_entry *oe,
 		     struct dentry *upperdentry, struct path *path);
 enum ovl_path_type ovl_path_real(struct dentry *dentry, struct path *path);

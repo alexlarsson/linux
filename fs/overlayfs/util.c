@@ -222,9 +222,9 @@ void ovl_path_lower(struct dentry *dentry, struct path *path)
 	}
 }
 
-void ovl_path_lowerdata(struct dentry *dentry, struct path *path)
+void ovl_e_path_lowerdata(struct ovl_entry *oe,
+			  struct path *path)
 {
-	struct ovl_entry *oe = OVL_E(dentry);
 	struct ovl_path *lowerdata = ovl_lowerdata(oe);
 	struct dentry *lowerdata_dentry = ovl_lowerdata_dentry(oe);
 
@@ -240,6 +240,11 @@ void ovl_path_lowerdata(struct dentry *dentry, struct path *path)
 	} else {
 		*path = (struct path) { };
 	}
+}
+
+void ovl_path_lowerdata(struct dentry *dentry, struct path *path)
+{
+	return ovl_e_path_lowerdata(OVL_E(dentry), path);
 }
 
 enum ovl_path_type ovl_path_real(struct dentry *dentry, struct path *path)
