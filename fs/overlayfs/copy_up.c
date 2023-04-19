@@ -544,6 +544,7 @@ struct ovl_copy_up_ctx {
 	bool origin;
 	bool indexed;
 	bool metacopy;
+	bool metacopy_digest;
 };
 
 static int ovl_link_up(struct ovl_copy_up_ctx *c)
@@ -641,8 +642,21 @@ static int ovl_copy_up_metadata(struct ovl_copy_up_ctx *c, struct dentry *temp)
 	}
 
 	if (c->metacopy) {
-		err = ovl_check_setxattr(ofs, temp, OVL_XATTR_METACOPY,
-					 NULL, 0, -EOPNOTSUPP);
+		struct path lowerdatapath;
+		struct ovl_metacopy metacopy_data = OVL_METACOPY_INIT;
+
+		ovl_path_lowerdata(c->dentry, &lowerdatapath);
+		if (WARN_ON_ONCE(lowerdatapath.dentry == NULL))
+			err = -EIO;
+		else
+			err = ovl_set_verity_xattr_from(ofs, &lowerdatapath, &metacopy_data);
+
+		if (metacopy_data.digest_algo)
+			c->metacopy_digest = true;
+
+		if (!err)
+			err = ovl_set_metacopy_xattr(ofs, temp, &metacopy_data);
+
 		if (err)
 			return err;
 	}
@@ -751,6 +765,12 @@ static int ovl_copy_up_workdir(struct ovl_copy_up_ctx *c)
 	if (err)
 		goto cleanup;
 
+	if (c->metacopy_digest)
+		ovl_set_flag(OVL_HAS_DIGEST, d_inode(c->dentry));
+	else
+		ovl_clear_flag(OVL_HAS_DIGEST, d_inode(c->dentry));
+	ovl_clear_flag(OVL_VERIFIED_DIGEST, d_inode(c->dentry));
+
 	if (!c->metacopy)
 		ovl_set_upperdata(d_inode(c->dentry));
 	inode = d_inode(c->dentry);
@@ -812,6 +832,12 @@ static int ovl_copy_up_tmpfile(struct ovl_copy_up_ctx *c)
 
 	if (err)
 		goto out_fput;
+
+	if (c->metacopy_digest)
+		ovl_set_flag(OVL_HAS_DIGEST, d_inode(c->dentry));
+	else
+		ovl_clear_flag(OVL_HAS_DIGEST, d_inode(c->dentry));
+	ovl_clear_flag(OVL_VERIFIED_DIGEST, d_inode(c->dentry));
 
 	if (!c->metacopy)
 		ovl_set_upperdata(d_inode(c->dentry));
@@ -918,6 +944,19 @@ static bool ovl_need_meta_copy_up(struct dentry *dentry, umode_t mode,
 	if (flags && ((OPEN_FMODE(flags) & FMODE_WRITE) || (flags & O_TRUNC)))
 		return false;
 
+	/* Fall back to full copy if no fsverity on source data and we require verity */
+	if (ofs->config.verity_mode == OVL_VERITY_REQUIRE) {
+		struct path lowerdata;
+
+		ovl_path_lowerdata(dentry, &lowerdata);
+
+		if (WARN_ON_ONCE(lowerdata.dentry == NULL) ||
+		    ovl_ensure_verity_loaded(&lowerdata) ||
+		    !fsverity_get_info(d_inode(lowerdata.dentry))) {
+			return false;
+		}
+	}
+
 	return true;
 }
 
@@ -984,6 +1023,8 @@ static int ovl_copy_up_meta_inode_data(struct ovl_copy_up_ctx *c)
 	if (err)
 		goto out_free;
 
+	ovl_clear_flag(OVL_HAS_DIGEST, d_inode(c->dentry));
+	ovl_clear_flag(OVL_VERIFIED_DIGEST, d_inode(c->dentry));
 	ovl_set_upperdata(d_inode(c->dentry));
 out_free:
 	kfree(capability);
