@@ -70,12 +70,19 @@ enum {
 	OVL_XINO_ON,
 };
 
+enum {
+	OVL_VERITY_OFF,
+	OVL_VERITY_ON,
+	OVL_VERITY_REQUIRE,
+};
+
 /* The set of options that user requested explicitly via mount options */
 struct ovl_opt_set {
 	bool metacopy;
 	bool redirect;
 	bool nfs_export;
 	bool index;
+	bool verity;
 };
 
 /*
