@@ -13,6 +13,9 @@ struct ovl_config {
 	bool redirect_dir;
 	bool redirect_follow;
 	const char *redirect_mode;
+	bool verity;
+	bool require_verity;
+	const char *verity_mode;
 	bool index;
 	bool uuid;
 	bool nfs_export;
