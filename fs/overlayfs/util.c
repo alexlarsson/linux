@@ -575,6 +575,16 @@ bool ovl_is_whiteout(struct dentry *dentry)
 	return inode && IS_WHITEOUT(inode);
 }
 
+/*
+ * Use this over ovl_is_whiteout for upper and lower files, as it also
+ * handles escaped whiteout files.
+ */
+bool ovl_path_is_whiteout(struct ovl_fs *ofs, const struct path *path)
+{
+	return ovl_is_whiteout(path->dentry) &&
+		!ovl_path_check_nowhiteout_xattr(ofs, path);
+}
+
 struct file *ovl_path_open(const struct path *path, int flags)
 {
 	struct inode *inode = d_inode(path->dentry);
@@ -661,6 +671,14 @@ int ovl_copy_up_start(struct dentry *dentry, int flags)
 void ovl_copy_up_end(struct dentry *dentry)
 {
 	ovl_inode_unlock(d_inode(dentry));
+}
+
+bool ovl_path_check_nowhiteout_xattr(struct ovl_fs *ofs, const struct path *path)
+{
+	int res;
+
+	res = ovl_path_getxattr(ofs, path, OVL_XATTR_NOWHITEOUT, NULL, 0);
+	return res >= 0;
 }
 
 bool ovl_path_check_origin_xattr(struct ovl_fs *ofs, const struct path *path)
@@ -760,6 +778,7 @@ bool ovl_path_check_dir_xattr(struct ovl_fs *ofs, const struct path *path,
 #define OVL_XATTR_UUID_POSTFIX		"uuid"
 #define OVL_XATTR_METACOPY_POSTFIX	"metacopy"
 #define OVL_XATTR_PROTATTR_POSTFIX	"protattr"
+#define OVL_XATTR_NOWHITEOUT_POSTFIX	"nowhiteout"
 
 #define OVL_XATTR_TAB_ENTRY(x) \
 	[x] = { [false] = OVL_XATTR_TRUSTED_PREFIX x ## _POSTFIX, \
@@ -775,6 +794,7 @@ const char *const ovl_xattr_table[][2] = {
 	OVL_XATTR_TAB_ENTRY(OVL_XATTR_UUID),
 	OVL_XATTR_TAB_ENTRY(OVL_XATTR_METACOPY),
 	OVL_XATTR_TAB_ENTRY(OVL_XATTR_PROTATTR),
+	OVL_XATTR_TAB_ENTRY(OVL_XATTR_NOWHITEOUT),
 };
 
 int ovl_check_setxattr(struct ovl_fs *ofs, struct dentry *upperdentry,

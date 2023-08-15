@@ -442,6 +442,11 @@ static int ovl_set_upper_acl(struct ovl_fs *ofs, struct dentry *upperdentry,
 	return ovl_do_set_acl(ofs, upperdentry, acl_name, acl);
 }
 
+static bool ovl_cattr_is_whiteout(struct ovl_cattr *attr)
+{
+	return S_ISCHR(attr->mode) && attr->rdev == WHITEOUT_DEV;
+}
+
 static int ovl_create_over_whiteout(struct dentry *dentry, struct inode *inode,
 				    struct ovl_cattr *cattr)
 {
@@ -477,13 +482,21 @@ static int ovl_create_over_whiteout(struct dentry *dentry, struct inode *inode,
 		goto out_unlock;
 
 	err = -ESTALE;
-	if (d_is_negative(upper) || !IS_WHITEOUT(d_inode(upper)))
+	if (!ovl_cattr_is_whiteout(cattr) &&
+	    (d_is_negative(upper) || !ovl_upper_is_whiteout(ofs, upper)))
 		goto out_dput;
 
 	newdentry = ovl_create_temp(ofs, workdir, cattr);
 	err = PTR_ERR(newdentry);
 	if (IS_ERR(newdentry))
 		goto out_dput;
+
+	if (ovl_cattr_is_whiteout(cattr)) {
+		err = ovl_setxattr(ofs, newdentry, OVL_XATTR_NOWHITEOUT,
+				   NULL, 0);
+		if (err < 0)
+			goto out_cleanup;
+	}
 
 	/*
 	 * mode could have been mutilated due to umask (e.g. sgid directory)
@@ -606,7 +619,8 @@ static int ovl_create_or_link(struct dentry *dentry, struct inode *inode,
 		put_cred(override_cred);
 	}
 
-	if (!ovl_dentry_is_whiteout(dentry))
+	/* Create whiteouts in workdir so we can atomically set nowiteout xattr */
+	if (!ovl_dentry_is_whiteout(dentry) && !ovl_cattr_is_whiteout(attr))
 		err = ovl_create_upper(dentry, inode, attr);
 	else
 		err = ovl_create_over_whiteout(dentry, inode, attr);
@@ -669,10 +683,6 @@ static int ovl_mkdir(struct mnt_idmap *idmap, struct inode *dir,
 static int ovl_mknod(struct mnt_idmap *idmap, struct inode *dir,
 		     struct dentry *dentry, umode_t mode, dev_t rdev)
 {
-	/* Don't allow creation of "whiteout" on overlay */
-	if (S_ISCHR(mode) && rdev == WHITEOUT_DEV)
-		return -EPERM;
-
 	return ovl_create_object(dentry, mode, rdev, NULL);
 }
 
@@ -1219,7 +1229,7 @@ static int ovl_rename(struct mnt_idmap *idmap, struct inode *olddir,
 		}
 	} else {
 		if (!d_is_negative(newdentry)) {
-			if (!new_opaque || !ovl_is_whiteout(newdentry))
+			if (!new_opaque || !ovl_upper_is_whiteout(ofs, newdentry))
 				goto out_dput;
 		} else {
 			if (flags & RENAME_EXCHANGE)
