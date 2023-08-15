@@ -339,6 +339,18 @@ static const char *ovl_get_link(struct dentry *dentry,
 	return p;
 }
 
+bool ovl_is_escaped_xattr(struct super_block *sb, const char *name)
+{
+	struct ovl_fs *ofs = sb->s_fs_info;
+
+	if (ofs->config.userxattr)
+		return strncmp(name, OVL_XATTR_ESCAPE_USER_PREFIX,
+			       OVL_XATTR_ESCAPE_USER_PREFIX_LEN) == 0;
+	else
+		return strncmp(name, OVL_XATTR_ESCAPE_TRUSTED_PREFIX,
+			       OVL_XATTR_ESCAPE_TRUSTED_PREFIX_LEN - 1) == 0;
+}
+
 bool ovl_is_private_xattr(struct super_block *sb, const char *name)
 {
 	struct ovl_fs *ofs = OVL_FS(sb);
@@ -417,8 +429,8 @@ int ovl_xattr_get(struct dentry *dentry, struct inode *inode, const char *name,
 
 static bool ovl_can_list(struct super_block *sb, const char *s)
 {
-	/* Never list private (.overlay) */
-	if (ovl_is_private_xattr(sb, s))
+	/* Never list non-escaped private (.overlay) */
+	if (ovl_is_private_xattr(sb, s) && !ovl_is_escaped_xattr(sb, s))
 		return false;
 
 	/* List all non-trusted xattrs */
@@ -432,16 +444,21 @@ static bool ovl_can_list(struct super_block *sb, const char *s)
 ssize_t ovl_listxattr(struct dentry *dentry, char *list, size_t size)
 {
 	struct dentry *realdentry = ovl_dentry_real(dentry);
+	struct ovl_fs *ofs = OVL_FS(dentry->d_sb);
 	ssize_t res;
 	size_t len;
 	char *s;
 	const struct cred *old_cred;
+	size_t prefix_len;
 
 	old_cred = ovl_override_creds(dentry->d_sb);
 	res = vfs_listxattr(realdentry, list, size);
 	revert_creds(old_cred);
 	if (res <= 0 || size == 0)
 		return res;
+
+	prefix_len = ofs->config.userxattr ?
+		OVL_XATTR_USER_PREFIX_LEN : OVL_XATTR_TRUSTED_PREFIX_LEN;
 
 	/* filter out private xattrs */
 	for (s = list, len = res; len;) {
@@ -455,6 +472,12 @@ ssize_t ovl_listxattr(struct dentry *dentry, char *list, size_t size)
 		if (!ovl_can_list(dentry->d_sb, s)) {
 			res -= slen;
 			memmove(s, s + slen, len);
+		} else if (ovl_is_escaped_xattr(dentry->d_sb, s)) {
+			memmove(s + prefix_len,
+				s + prefix_len + OVL_XATTR_ESCAPE_PREFIX_LEN,
+				slen - (prefix_len + OVL_XATTR_ESCAPE_PREFIX_LEN) + len);
+			res -= OVL_XATTR_ESCAPE_PREFIX_LEN;
+			s += slen - OVL_XATTR_ESCAPE_PREFIX_LEN;
 		} else {
 			s += slen;
 		}

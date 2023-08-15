@@ -434,11 +434,47 @@ static bool ovl_workdir_ok(struct dentry *workdir, struct dentry *upperdir)
 	return ok;
 }
 
+static char *ovl_xattr_escape_name(const char *prefix, const char *name)
+{
+	size_t prefix_len = strlen(prefix);
+	size_t name_len = strlen(name);
+	size_t escaped_len;
+	char *escaped, *s;
+
+	escaped_len = prefix_len + OVL_XATTR_ESCAPE_PREFIX_LEN + name_len;
+	if (escaped_len > XATTR_NAME_MAX)
+		return ERR_PTR(-EOPNOTSUPP);
+
+	escaped = kmalloc(escaped_len + 1, GFP_KERNEL);
+	if (escaped == NULL)
+		return ERR_PTR(-ENOMEM);
+
+	s = escaped;
+	memcpy(s, prefix, prefix_len);
+	s += prefix_len;
+	memcpy(s, OVL_XATTR_ESCAPE_PREFIX, OVL_XATTR_ESCAPE_PREFIX_LEN);
+	s += OVL_XATTR_ESCAPE_PREFIX_LEN;
+	memcpy(s, name, name_len + 1);
+
+	return escaped;
+}
+
 static int ovl_own_xattr_get(const struct xattr_handler *handler,
 			     struct dentry *dentry, struct inode *inode,
 			     const char *name, void *buffer, size_t size)
 {
-	return -EOPNOTSUPP;
+	char *escaped;
+	int r;
+
+	escaped = ovl_xattr_escape_name(handler->prefix, name);
+	if (IS_ERR(escaped))
+		return PTR_ERR(escaped);
+
+	r = ovl_xattr_get(dentry, inode, escaped, buffer, size);
+
+	kfree(escaped);
+
+	return r;
 }
 
 static int ovl_own_xattr_set(const struct xattr_handler *handler,
@@ -447,7 +483,18 @@ static int ovl_own_xattr_set(const struct xattr_handler *handler,
 			     const char *name, const void *value,
 			     size_t size, int flags)
 {
-	return -EOPNOTSUPP;
+	char *escaped;
+	int r;
+
+	escaped = ovl_xattr_escape_name(handler->prefix, name);
+	if (IS_ERR(escaped))
+		return PTR_ERR(escaped);
+
+	r = ovl_xattr_set(dentry, inode, escaped, value, size, flags);
+
+	kfree(escaped);
+
+	return r;
 }
 
 static int ovl_other_xattr_get(const struct xattr_handler *handler,
