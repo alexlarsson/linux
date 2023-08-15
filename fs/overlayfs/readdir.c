@@ -280,7 +280,12 @@ static int ovl_check_whiteouts(const struct path *path, struct ovl_readdir_data 
 			rdd->first_maybe_whiteout = p->next_maybe_whiteout;
 			dentry = lookup_one(mnt_idmap(path->mnt), p->name, dir, p->len);
 			if (!IS_ERR(dentry)) {
-				p->is_whiteout = ovl_is_whiteout(dentry);
+				struct path childpath = {
+					.dentry = dentry,
+					.mnt = path->mnt,
+				};
+				p->is_whiteout = ovl_path_is_whiteout(OVL_FS(rdd->dentry->d_sb),
+								      &childpath);
 				dput(dentry);
 			}
 		}
