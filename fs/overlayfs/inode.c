@@ -175,6 +175,11 @@ int ovl_getattr(struct mnt_idmap *idmap, const struct path *path,
 	if (err)
 		goto out;
 
+	if (ovl_test_flag(OVL_WHITEOUT, inode)) {
+		stat->mode = S_IFCHR | (stat->mode & ~S_IFMT);
+		stat->rdev = WHITEOUT_DEV;
+	}
+
 	/* Report the effective immutable/append-only STATX flags */
 	generic_fill_statx_attr(inode, stat);
 
@@ -1222,6 +1227,8 @@ struct inode *ovl_get_inode(struct super_block *sb,
 	bool is_dir;
 	unsigned long ino = 0;
 	int err = oip->newinode ? -EEXIST : -ENOMEM;
+	umode_t realmode;
+	dev_t realrdev;
 
 	if (!realinode)
 		realinode = d_inode(lowerdentry);
@@ -1274,7 +1281,17 @@ struct inode *ovl_get_inode(struct super_block *sb,
 		ino = realinode->i_ino;
 		fsid = lowerpath->layer->fsid;
 	}
-	ovl_fill_inode(inode, realinode->i_mode, realinode->i_rdev);
+
+	realmode = realinode->i_mode;
+	realrdev = realinode->i_rdev;
+
+	if (ovl_path_check_whiteout_xattr(ofs, &realpath)) {
+		realmode = (realmode & ~S_IFMT) | S_IFCHR;
+		realrdev = WHITEOUT_DEV;
+		ovl_set_flag(OVL_WHITEOUT, inode);
+	}
+
+	ovl_fill_inode(inode, realmode, realrdev);
 	ovl_inode_init(inode, oip, ino, fsid);
 
 	if (upperdentry && ovl_is_impuredir(sb, upperdentry))

@@ -676,6 +676,19 @@ bool ovl_path_check_origin_xattr(struct ovl_fs *ofs, const struct path *path)
 	return false;
 }
 
+bool ovl_path_check_whiteout_xattr(struct ovl_fs *ofs, const struct path *path)
+{
+	struct dentry *dentry = path->dentry;
+	int res;
+
+	/* xattr based whiteouts must be fifo */
+	if (!S_ISFIFO(d_inode(dentry)->i_mode))
+		return false;
+
+	res = ovl_path_getxattr(ofs, path, OVL_XATTR_WHITEOUT, NULL, 0);
+	return res >= 0;
+}
+
 /*
  * Load persistent uuid from xattr into s_uuid if found, or store a new
  * random generated value in s_uuid and in xattr.
@@ -760,6 +773,7 @@ bool ovl_path_check_dir_xattr(struct ovl_fs *ofs, const struct path *path,
 #define OVL_XATTR_UUID_POSTFIX		"uuid"
 #define OVL_XATTR_METACOPY_POSTFIX	"metacopy"
 #define OVL_XATTR_PROTATTR_POSTFIX	"protattr"
+#define OVL_XATTR_WHITEOUT_POSTFIX	"whiteout"
 
 #define OVL_XATTR_TAB_ENTRY(x) \
 	[x] = { [false] = OVL_XATTR_TRUSTED_PREFIX x ## _POSTFIX, \
@@ -775,6 +789,7 @@ const char *const ovl_xattr_table[][2] = {
 	OVL_XATTR_TAB_ENTRY(OVL_XATTR_UUID),
 	OVL_XATTR_TAB_ENTRY(OVL_XATTR_METACOPY),
 	OVL_XATTR_TAB_ENTRY(OVL_XATTR_PROTATTR),
+	OVL_XATTR_TAB_ENTRY(OVL_XATTR_WHITEOUT),
 };
 
 int ovl_check_setxattr(struct ovl_fs *ofs, struct dentry *upperdentry,
@@ -1408,7 +1423,10 @@ void ovl_copyattr(struct inode *inode)
 
 	inode->i_uid = vfsuid_into_kuid(vfsuid);
 	inode->i_gid = vfsgid_into_kgid(vfsgid);
-	inode->i_mode = realinode->i_mode;
+	if (ovl_test_flag(OVL_WHITEOUT, inode))
+		inode->i_mode = S_IFCHR | (realinode->i_mode & ~S_IFMT);
+	else
+		inode->i_mode = realinode->i_mode;
 	inode->i_atime = realinode->i_atime;
 	inode->i_mtime = realinode->i_mtime;
 	inode->i_ctime = realinode->i_ctime;
