@@ -49,6 +49,8 @@ enum ovl_xattr {
 	OVL_XATTR_UUID,
 	OVL_XATTR_METACOPY,
 	OVL_XATTR_PROTATTR,
+        OVL_XATTR_XWHITEOUT,
+        OVL_XATTR_XWHITEOUTS,
 };
 
 enum ovl_inode_flag {
@@ -62,6 +64,7 @@ enum ovl_inode_flag {
 	OVL_CONST_INO,
 	OVL_HAS_DIGEST,
 	OVL_VERIFIED_DIGEST,
+	OVL_XWHITEOUT,
 };
 
 enum ovl_entry_flag {
@@ -476,6 +479,9 @@ bool ovl_already_copied_up(struct dentry *dentry, int flags);
 bool ovl_path_check_dir_xattr(struct ovl_fs *ofs, const struct path *path,
 			      enum ovl_xattr ox);
 bool ovl_path_check_origin_xattr(struct ovl_fs *ofs, const struct path *path);
+bool ovl_is_xwhiteout(struct inode *inode);
+bool ovl_path_check_xwhiteout_xattr(struct ovl_fs *ofs, const struct path *path);
+bool ovl_path_check_xwhiteouts_xattr(struct ovl_fs *ofs, const struct path *path);
 bool ovl_init_uuid_xattr(struct super_block *sb, struct ovl_fs *ofs,
 			 const struct path *upperpath);
 

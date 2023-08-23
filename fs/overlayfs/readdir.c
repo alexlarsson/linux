@@ -25,6 +25,7 @@ struct ovl_cache_entry {
 	struct ovl_cache_entry *next_maybe_whiteout;
 	bool is_upper;
 	bool is_whiteout;
+	bool check_xwhiteout;
 	char name[];
 };
 
@@ -47,6 +48,7 @@ struct ovl_readdir_data {
 	int err;
 	bool is_upper;
 	bool d_type_supported;
+	bool in_xwhiteouts_dir;
 };
 
 struct ovl_dir_file {
@@ -162,6 +164,8 @@ static struct ovl_cache_entry *ovl_cache_entry_new(struct ovl_readdir_data *rdd,
 		p->ino = 0;
 	p->is_upper = rdd->is_upper;
 	p->is_whiteout = false;
+	/* Defer check for overlay.whiteout to ovl_iterate() */
+	p->check_xwhiteout = rdd->in_xwhiteouts_dir && d_type == DT_REG;
 
 	if (d_type == DT_CHR) {
 		p->next_maybe_whiteout = rdd->first_maybe_whiteout;
@@ -301,6 +305,7 @@ static inline int ovl_dir_read(const struct path *realpath,
 	if (IS_ERR(realfile))
 		return PTR_ERR(realfile);
 
+	rdd->in_xwhiteouts_dir = ovl_path_check_xwhiteouts_xattr(OVL_FS(rdd->dentry->d_sb), realpath);
 	rdd->first_maybe_whiteout = NULL;
 	rdd->ctx.pos = 0;
 	do {
@@ -455,6 +460,8 @@ static u64 ovl_remap_lower_ino(u64 ino, int xinobits, int fsid,
  * When all layers are on the same fs, and upper has a reference to
  * copy up origin, call vfs_getattr() on the overlay entry to make
  * sure that d_ino will be consistent with st_ino from stat(2).
+ *
+ * Also updates d_type for based on the overlay.whiteout xattr.
  */
 static int ovl_cache_update_ino(const struct path *path, struct ovl_cache_entry *p)
 
@@ -467,7 +474,8 @@ static int ovl_cache_update_ino(const struct path *path, struct ovl_cache_entry 
 	int xinobits = ovl_xino_bits(ofs);
 	int err = 0;
 
-	if (!ovl_same_dev(ofs))
+	/* Early exit if we need to nothing */
+	if (!ovl_same_dev(ofs) && !p->check_xwhiteout)
 		goto out;
 
 	if (p->name[0] == '.') {
@@ -494,6 +502,13 @@ static int ovl_cache_update_ino(const struct path *path, struct ovl_cache_entry 
 	}
 
 get:
+	if (p->check_xwhiteout &&
+	    ovl_is_xwhiteout(d_inode(this)))
+		p->type = DT_CHR;
+
+	if (p->ino || !ovl_same_dev(ofs))
+		goto out;
+
 	type = ovl_path_type(this);
 	if (OVL_TYPE_ORIGIN(type)) {
 		struct kstat stat;
@@ -778,7 +793,7 @@ static int ovl_iterate(struct file *file, struct dir_context *ctx)
 	while (od->cursor != &od->cache->entries) {
 		p = list_entry(od->cursor, struct ovl_cache_entry, l_node);
 		if (!p->is_whiteout) {
-			if (!p->ino) {
+			if (!p->ino || p->check_xwhiteout) {
 				err = ovl_cache_update_ino(&file->f_path, p);
 				if (err)
 					goto out;

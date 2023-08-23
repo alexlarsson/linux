@@ -175,6 +175,11 @@ int ovl_getattr(struct mnt_idmap *idmap, const struct path *path,
 	if (err)
 		goto out;
 
+	if (ovl_is_xwhiteout(inode)) {
+		stat->mode = S_IFCHR | (stat->mode & ~S_IFMT);
+		stat->rdev = WHITEOUT_DEV;
+	}
+
 	/* Report the effective immutable/append-only STATX flags */
 	generic_fill_statx_attr(inode, stat);
 
@@ -903,6 +908,11 @@ void ovl_inode_init(struct inode *inode, struct ovl_inode_params *oip,
 
 static void ovl_fill_inode(struct inode *inode, umode_t mode, dev_t rdev)
 {
+	if (ovl_is_xwhiteout(inode)) {
+		mode = (mode & ~S_IFMT) | S_IFCHR;
+		rdev = WHITEOUT_DEV;
+	}
+
 	inode->i_mode = mode;
 	inode->i_flags |= S_NOCMTIME;
 #ifdef CONFIG_FS_POSIX_ACL
@@ -1274,6 +1284,11 @@ struct inode *ovl_get_inode(struct super_block *sb,
 		ino = realinode->i_ino;
 		fsid = lowerpath->layer->fsid;
 	}
+
+	if (ovl_path_check_xwhiteout_xattr(ofs, &realpath)) {
+		ovl_set_flag(OVL_XWHITEOUT, inode);
+	}
+
 	ovl_fill_inode(inode, realinode->i_mode, realinode->i_rdev);
 	ovl_inode_init(inode, oip, ino, fsid);
 
