@@ -163,7 +163,7 @@ static struct ovl_cache_entry *ovl_cache_entry_new(struct ovl_readdir_data *rdd,
 	p->is_upper = rdd->is_upper;
 	p->is_whiteout = false;
 
-	if (d_type == DT_CHR) {
+	if (d_type == DT_CHR || d_type == DT_FIFO) {
 		p->next_maybe_whiteout = rdd->first_maybe_whiteout;
 		rdd->first_maybe_whiteout = p;
 	}
@@ -280,7 +280,12 @@ static int ovl_check_whiteouts(const struct path *path, struct ovl_readdir_data 
 			rdd->first_maybe_whiteout = p->next_maybe_whiteout;
 			dentry = lookup_one(mnt_idmap(path->mnt), p->name, dir, p->len);
 			if (!IS_ERR(dentry)) {
-				p->is_whiteout = ovl_is_whiteout(dentry);
+				struct path childpath = {
+					.dentry = dentry,
+					.mnt = path->mnt,
+				};
+				p->is_whiteout = ovl_path_is_whiteout(OVL_FS(rdd->dentry->d_sb),
+								      &childpath);
 				dput(dentry);
 			}
 		}
