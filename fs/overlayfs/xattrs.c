@@ -92,6 +92,25 @@ static int ovl_xattr_get(struct dentry *dentry, struct inode *inode, const char 
 	return res;
 }
 
+static int ovl_xattr_get_first(struct dentry *dentry, struct inode *inode, const char *name,
+			       void *value, size_t size)
+{
+	const struct cred *old_cred;
+	struct path realpath;
+	int idx, next;
+	int res = -ENODATA;
+
+	old_cred = ovl_override_creds(dentry->d_sb);
+	for (idx = 0; idx != -1; idx = next) {
+		next = ovl_path_next(idx, dentry, &realpath);
+		res = vfs_getxattr(mnt_idmap(realpath.mnt), realpath.dentry, name, value, size);
+		if (res != -ENODATA && res != -EOPNOTSUPP)
+			break;
+	}
+	revert_creds(old_cred);
+	return res;
+}
+
 static bool ovl_can_list(struct super_block *sb, const char *s)
 {
 	/* Never list non-escaped private (.overlay) */
@@ -176,6 +195,18 @@ static char *ovl_xattr_escape_name(const char *prefix, const char *name)
 	return escaped;
 }
 
+
+static int str_ends_with(const char *s, const char *sub)
+{
+	int slen = strlen(s);
+	int sublen = strlen(sub);
+
+	if (sublen > slen)
+		return 0;
+
+	return !memcmp(s + slen - sublen, sub, sublen);
+}
+
 static int ovl_own_xattr_get(const struct xattr_handler *handler,
 			     struct dentry *dentry, struct inode *inode,
 			     const char *name, void *buffer, size_t size)
@@ -187,7 +218,20 @@ static int ovl_own_xattr_get(const struct xattr_handler *handler,
 	if (IS_ERR(escaped))
 		return PTR_ERR(escaped);
 
-	r = ovl_xattr_get(dentry, inode, escaped, buffer, size);
+	/*
+	 * Escaped "overlay.whiteouts" directories need to be combined across layers.
+	 * For example, if a lower layer contains an escaped "overlay.whiteout"
+	 * its parent directory will be marked with an escaped "overlay.whiteouts".
+	 * The merged directory will contain a (now non-escaped) whiteout, and its
+	 * parent should therefore be marked too. However, if a layer above the marked
+	 * one has covers the same directory but without whiteouts the covering directory
+	 * would not be marged, and thus the merged directory would not be marked.
+	 */
+	if (d_is_dir(dentry) &&
+	    str_ends_with(escaped, "overlay.whiteouts"))
+		r = ovl_xattr_get_first(dentry, inode, escaped, buffer, size);
+	else
+		r = ovl_xattr_get(dentry, inode, escaped, buffer, size);
 
 	kfree(escaped);
 
