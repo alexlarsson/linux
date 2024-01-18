@@ -1027,6 +1027,7 @@ static int ovl_get_layers(struct super_block *sb, struct ovl_fs *ofs,
 		struct vfsmount *mnt;
 		struct inode *trap;
 		int fsid;
+		bool use_xwhiteouts;
 
 		if (i < nr_merged_lower)
 			fsid = ovl_get_fsid(ofs, &l->path);
@@ -1035,6 +1036,7 @@ static int ovl_get_layers(struct super_block *sb, struct ovl_fs *ofs,
 		if (fsid < 0)
 			return fsid;
 
+		use_xwhiteouts = ovl_path_check_feature_xwhiteouts_xattr(ofs, &l->path);
 		/*
 		 * Check if lower root conflicts with this overlay layers before
 		 * checking if it is in-use as upperdir/workdir of "another"
@@ -1073,6 +1075,7 @@ static int ovl_get_layers(struct super_block *sb, struct ovl_fs *ofs,
 		layers[ofs->numlayer].idx = ofs->numlayer;
 		layers[ofs->numlayer].fsid = fsid;
 		layers[ofs->numlayer].fs = &ofs->fs[fsid];
+		layers[ofs->numlayer].use_xwhiteouts = use_xwhiteouts;
 		/* Store for printing lowerdir=... in ovl_show_options() */
 		ofs->config.lowerdirs[ofs->numlayer] = l->name;
 		l->name = NULL;

@@ -51,6 +51,7 @@ enum ovl_xattr {
 	OVL_XATTR_PROTATTR,
 	OVL_XATTR_XWHITEOUT,
 	OVL_XATTR_XWHITEOUTS,
+	OVL_XATTR_FEATURE_XWHITEOUTS,
 };
 
 enum ovl_inode_flag {
@@ -499,6 +500,7 @@ bool ovl_path_check_dir_xattr(struct ovl_fs *ofs, const struct path *path,
 bool ovl_path_check_origin_xattr(struct ovl_fs *ofs, const struct path *path);
 bool ovl_path_check_xwhiteout_xattr(struct ovl_fs *ofs, const struct path *path);
 bool ovl_path_check_xwhiteouts_xattr(struct ovl_fs *ofs, const struct path *path);
+bool ovl_path_check_feature_xwhiteouts_xattr(struct ovl_fs *ofs, const struct path *path);
 bool ovl_init_uuid_xattr(struct super_block *sb, struct ovl_fs *ofs,
 			 const struct path *upperpath);
 
@@ -680,7 +682,7 @@ int ovl_get_index_name(struct ovl_fs *ofs, struct dentry *origin,
 struct dentry *ovl_get_index_fh(struct ovl_fs *ofs, struct ovl_fh *fh);
 struct dentry *ovl_lookup_index(struct ovl_fs *ofs, struct dentry *upper,
 				struct dentry *origin, bool verify);
-int ovl_path_next(int idx, struct dentry *dentry, struct path *path);
+int ovl_path_next(int idx, struct dentry *dentry, struct path *path, int *currentidx);
 int ovl_verify_lowerdata(struct dentry *dentry);
 struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 			  unsigned int flags);

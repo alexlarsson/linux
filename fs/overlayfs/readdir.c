@@ -305,8 +305,6 @@ static inline int ovl_dir_read(const struct path *realpath,
 	if (IS_ERR(realfile))
 		return PTR_ERR(realfile);
 
-	rdd->in_xwhiteouts_dir = rdd->dentry &&
-		ovl_path_check_xwhiteouts_xattr(OVL_FS(rdd->dentry->d_sb), realpath);
 	rdd->first_maybe_whiteout = NULL;
 	rdd->ctx.pos = 0;
 	do {
@@ -351,6 +349,7 @@ static int ovl_dir_read_merged(struct dentry *dentry, struct list_head *list,
 {
 	int err;
 	struct path realpath;
+	struct ovl_fs *ofs = OVL_FS(dentry->d_sb);
 	struct ovl_readdir_data rdd = {
 		.ctx.actor = ovl_fill_merge,
 		.dentry = dentry,
@@ -361,8 +360,11 @@ static int ovl_dir_read_merged(struct dentry *dentry, struct list_head *list,
 	int idx, next;
 
 	for (idx = 0; idx != -1; idx = next) {
-		next = ovl_path_next(idx, dentry, &realpath);
+		next = ovl_path_next(idx, dentry, &realpath, &idx);
 		rdd.is_upper = ovl_dentry_upper(dentry) == realpath.dentry;
+		rdd.in_xwhiteouts_dir =
+		  ofs->layers[idx].use_xwhiteouts &&
+		  ovl_path_check_xwhiteouts_xattr(ofs, &realpath);
 
 		if (next != -1) {
 			err = ovl_dir_read(&realpath, &rdd);

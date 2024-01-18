@@ -40,6 +40,8 @@ struct ovl_layer {
 	int idx;
 	/* One fsid per unique underlying sb (upper fsid == 0) */
 	int fsid;
+	/* Set if layer has a feature_whiteouts xattr on root */
+	bool use_xwhiteouts;
 };
 
 struct ovl_path {

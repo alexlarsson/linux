@@ -752,6 +752,11 @@ bool ovl_path_check_xwhiteouts_xattr(struct ovl_fs *ofs, const struct path *path
 	return res >= 0;
 }
 
+bool ovl_path_check_feature_xwhiteouts_xattr(struct ovl_fs *ofs, const struct path *path)
+{
+  return ovl_path_getxattr(ofs, path, OVL_XATTR_FEATURE_XWHITEOUTS, NULL, 0) >= 0;
+}
+
 /*
  * Load persistent uuid from xattr into s_uuid if found, or store a new
  * random generated value in s_uuid and in xattr.
@@ -838,6 +843,7 @@ bool ovl_path_check_dir_xattr(struct ovl_fs *ofs, const struct path *path,
 #define OVL_XATTR_PROTATTR_POSTFIX	"protattr"
 #define OVL_XATTR_XWHITEOUT_POSTFIX	"whiteout"
 #define OVL_XATTR_XWHITEOUTS_POSTFIX	"whiteouts"
+#define OVL_XATTR_FEATURE_XWHITEOUTS_POSTFIX "feature_whiteouts"
 
 #define OVL_XATTR_TAB_ENTRY(x) \
 	[x] = { [false] = OVL_XATTR_TRUSTED_PREFIX x ## _POSTFIX, \
@@ -855,6 +861,7 @@ const char *const ovl_xattr_table[][2] = {
 	OVL_XATTR_TAB_ENTRY(OVL_XATTR_PROTATTR),
 	OVL_XATTR_TAB_ENTRY(OVL_XATTR_XWHITEOUT),
 	OVL_XATTR_TAB_ENTRY(OVL_XATTR_XWHITEOUTS),
+	OVL_XATTR_TAB_ENTRY(OVL_XATTR_FEATURE_XWHITEOUTS),
 };
 
 int ovl_check_setxattr(struct ovl_fs *ofs, struct dentry *upperdentry,

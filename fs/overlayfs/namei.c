@@ -863,7 +863,7 @@ fail:
  * Returns next layer in stack starting from top.
  * Returns -1 if this is the last layer.
  */
-int ovl_path_next(int idx, struct dentry *dentry, struct path *path)
+int ovl_path_next(int idx, struct dentry *dentry, struct path *path, int *currentidx)
 {
 	struct ovl_entry *oe = OVL_E(dentry);
 	struct ovl_path *lowerstack = ovl_lowerstack(oe);
@@ -871,14 +871,17 @@ int ovl_path_next(int idx, struct dentry *dentry, struct path *path)
 	BUG_ON(idx < 0);
 	if (idx == 0) {
 		ovl_path_upper(dentry, path);
-		if (path->dentry)
+		if (path->dentry) {
+			*currentidx = idx;
 			return ovl_numlower(oe) ? 1 : -1;
+                }
 		idx++;
 	}
 	BUG_ON(idx > ovl_numlower(oe));
 	path->dentry = lowerstack[idx - 1].dentry;
 	path->mnt = lowerstack[idx - 1].layer->mnt;
 
+	*currentidx = idx;
 	return (idx < ovl_numlower(oe)) ? idx + 1 : -1;
 }
 
